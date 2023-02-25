@@ -4,10 +4,11 @@ This project uses Julia 1.8.3. [juliaup](https://github.com/JuliaLang/juliaup) i
 To install:
 - Clone the repository with `git clone https://github.com/DDoyle1066/UDE_Customer_Behavior`
 - Activate the environment and install packages with
-```julia
+```julia-repl
 julia> ]
 
 (@v1.8) pkg> activate .
 
 (UDE_Customer_Behavior) pkg> instantiate
 ```
+
