@@ -1,14 +1,9 @@
 # Universal Differential Equations to Forecast Customer Behavior
-This project uses a [Universal Differential Equation (UDE) framework](./refs/Universal_Differential_Equations_for_Scientific_Machine_Learning.pdf) to forecast customer behavior that follows a hypothetical framework. Specifically, this project examines:
-- The relative efficacy of traditional, deep learning and UDE methods in forecasting consumber behavior
-- The downstream utility of each forecasting method in downstream applications of:
-    - Pricing
-    - Reserving
-    - New Product Offerings
-- The ability of each method to perform in static and dynamic environments
+This project uses a [Universal Differential Equation (UDE) framework](./refs/Universal_Differential_Equations_for_Scientific_Machine_Learning.pdf) to forecast customer behavior that follows a hypothetical framework. Specifically, this project examines the relative efficacy of traditional, deep learning and UDE methods in forecasting consumer behavior using data from the [M5 Forecasting competition](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) where the goal was to provide confidence intervals around consumer demand predictions.
+
 
 # Installation
-This project uses Julia 1.8.3. [juliaup](https://github.com/JuliaLang/juliaup) is the recommeneded manager for Julia installations.
+This project uses Julia 1.8.5. [juliaup](https://github.com/JuliaLang/juliaup) is the recommeneded manager for Julia installations.
 To install:
 - Clone the repository with `git clone https://github.com/DDoyle1066/UDE_Customer_Behavior`
 - Activate the environment and install packages with:
