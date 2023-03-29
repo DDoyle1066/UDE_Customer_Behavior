@@ -4,6 +4,7 @@ using CSV: CSV
 using DataFrames
 using CategoricalArrays
 using DataConvenience
+using Random
 ## M5-Forecasting Example
 sales_data = CSV.read("data/sales_train_evaluation.csv", DataFrame)
 sell_prices = CSV.read("data/sell_prices.csv", DataFrame)
@@ -31,12 +32,15 @@ function process_sales(sales, day_start, day_end)
     return long_sales
 end
 processed_sales = process_sales(sales_data, 1, 50)
-### To-Do:
-#### Create JLD2 objects that can be interacted with by the model 
-#### Build elasticcity model for a single item in a single store
-#### Expand to multiple items in the same dept in a single store
-#### Exapnd to all items in a single store
-#### Move across stores
+
+#=
+To-Do:
+ - Create JLD2 objects that can be interacted with by the model 
+ - Build elasticcity model for a single item in a single store
+ - Expand to multiple items in the same dept in a single store
+ - Exapnd to all items in a single store
+Move across stores
+=#
 
 ## Hypothetical mortatlity Example
 #=
@@ -50,27 +54,89 @@ To-Do:
 - Effect of population on communicable diseases
 =#
 
-@parameters μ_env
-pop_size
-@variables t health(t) (pop(t))[1:1000, 1:2]
+@parameters μ_env Θ_region σ_region
+pop_size = 10_000
+num_regions = 4
+@variables t ages_pop(t)[1:pop_size] health_region(t)[1:num_regions,
+                                                      1:num_regions]
 D = Differential(t)
-
-eqs = [D(health) ~ 0,
-       Symbolics.scalarize(D.(pop) .~ β .* health .* pop)...]
-# eqs = [D(health) ~ 0]
-noiseeqs = [σ,
-            Symbolics.scalarize(0 .* pop)...]
+# Equations for how age rolls forward
+age_eqs = D.(ages_pop) .~ 1
+age_noise_eqs = Symbolics.scalarize(0 .* ages_pop)
+# Equations for how health propagates from region to region
+region_eqs = Matrix{Equation}(undef, num_regions, num_regions)
+for i in 1:num_regions
+    for j in 1:num_regions
+        avg_surrounging_health = 0
+        num_neighbors = 0
+        if i > 1
+            avg_surrounging_health += health_region[i - 1, j]
+            num_neighbors += 1
+        end
+        if i < num_regions
+            avg_surrounging_health += health_region[i + 1, j]
+            num_neighbors += 1
+        end
+        if j > 1
+            avg_surrounging_health += health_region[i, j - 1]
+            num_neighbors += 1
+        end
+        if j < num_regions
+            avg_surrounging_health += health_region[i, j + 1]
+            num_neighbors += 1
+        end
+        region_eqs[i, j] = D(health_region[i, j]) ~ Θ_region * (avg_surrounging_health /
+                                                                num_neighbors -
+                                                                health_region[i, j]) -
+                                                    σ_region^2 / 2
+    end
+end
+region_noise_eqs = Symbolics.scalarize(health_region .* σ_region)
+eqs = [Symbolics.scalarize(age_eqs)...,
+       Symbolics.scalarize(region_eqs)...]
+noiseeqs = [age_noise_eqs...,
+            region_noise_eqs...]
 # noiseeqs = [0.01σ]
-@named de = SDESystem(eqs, noiseeqs, t, [health, pop...], [σ, β]; tspan=(0, 10.0))
-
+@named de = SDESystem(eqs, noiseeqs, t, [ages_pop..., health_region...],
+                      [μ_env, Θ_region, σ_region]; tspan=(0, 10.0))
+ages_indices = 1:length(ages_pop)
+health_indices = (length(ages_pop) + 1):(length(health_region) + length(ages_pop))
 # u0map = [health => 1.0,
 #          pop => repeat([1.0], length(pop))]
-u0map = [health => 1.0, Symbolics.scalarize(pop .=> 1.0)...]
-parammap = [σ => 1.0,
-            β => 0.2]
+rng = MersenneTwister(20230326)
+init_ages = rand(rng, pop_size) .* 60
+init_health = exp.(randn(rng, num_regions, num_regions) / 10)
+u0map = [Symbolics.scalarize(ages_pop .=> init_ages)...,
+         Symbolics.scalarize(health_region .=> init_health)...]
+parammap = [μ_env => 1e-4,
+            Θ_region => 0.2,
+            σ_region => 0.01]
 
 prob = SDEProblem(de, u0map, (0.0, 10.0), parammap)
+@time sol = solve(prob, SOSRI())
+sol(10)[health_indices]
+plot(sol; idxs=health_region, legend=:none)
 
-sol = solve(prob, SOSRI())
-plot(sol)
+# example for julia lang
+@variables t1 x(t1)[1:10]
+@parameters μ σ
+Dx = Differential(t1)
+x_eq = Symbolics.scalarize(Dx.(x) .~ 1)
+x_noise_eq = Symbolics.scalarize(x .* σ)
+@named sde_sys = SDESystem(x_eq,
+                           x_noise_eq, t1,
+                           [x...],
+                           [μ, σ]; tspan=(0, 10.0))
+sde_prob = SDEProblem(sde_sys, Symbolics.scalarize(x .=> 1), (0.0, 10.0),
+                      [μ => 1, σ => 0.2])
+sde_sol = solve(sde_prob, SOSRI())
+sde_sol(0; idxs=x[1:2])
+plot(sde_sol; idxs=x[1:2])
+plot(sde_sol)
+@named ode_sys = ODESystem([Symbolics.scalarize(x_eq)...], t1,
+                           [x...],
+                           [μ, σ]; tspan=(0, 10.0))
+plot(sol; idxs=ages_pop[1:2])
 plot(sol; idxs=[health, pop])
+@syms (ages_pop(t))[1](var, var2)
+sol.du[1]
