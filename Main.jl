@@ -111,7 +111,6 @@ rng = MersenneTwister(20230326)
 init_ages = rand(rng, pop_size) .* 60
 init_health = exp.(randn(rng, num_regions, num_regions) / 10)
 u0map = [Symbolics.scalarize(ages_pop .=> init_ages)...,
-         Symbolics.scalarize(death_chance_pop .=> death_chances)...,
          Symbolics.scalarize(cum_mort_pop .=> 0)...,
          Symbolics.scalarize(health_region .=> init_health)...]
 parammap = [μ_env => 1e-4,
@@ -135,7 +134,7 @@ for i in 1:num_regions
         health_indices[i, j] = SciMLBase.sym_to_index(health_region[i, j], syms)
     end
 end
-sol(10; idxs=mort_indices)
+sol(10; idxs=health_indices)
 # example for julia lang
 @variables t1 x(t1)[1:10]
 @parameters μ σ
