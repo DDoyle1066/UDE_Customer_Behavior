@@ -6,6 +6,7 @@ using CategoricalArrays
 using DataConvenience
 using Random
 using SciMLBase
+using StatsPlots
 ## M5-Forecasting Example
 sales_data = CSV.read("data/sales_train_evaluation.csv", DataFrame)
 sell_prices = CSV.read("data/sell_prices.csv", DataFrame)
@@ -55,18 +56,23 @@ To-Do:
 - Effect of population on communicable diseases
 =#
 
-@parameters μ_env Θ_region σ_region
-pop_size = 10#_000
+@parameters μ_env μ_A μ_B Θ_region σ_region
+pop_size = 10_000
 num_regions = 4
 @variables t
 @variables ages_pop(t)[1:pop_size] cum_mort_pop(t)[1:pop_size]
 @variables health_region(t)[1:num_regions,
                             1:num_regions]
 D = Differential(t)
+rng = MersenneTwister(20230326)
+loc_pop_x = Int.(ceil.(rand(rng, pop_size) .* num_regions))
+loc_pop_y = Int.(ceil.(rand(rng, pop_size) .* num_regions))
+health_region_pop = [health_region[x, y] for (x, y) in zip(loc_pop_x, loc_pop_y)]
 # Equations for how age rolls forward
 age_eqs = D.(ages_pop) .~ 1
-mort_eqs = D.(cum_mort_pop) .~ μ_env
+mort_eqs = D.(cum_mort_pop) .~ (μ_A .* exp.(μ_B .* ages_pop) .+ μ_env) .* health_region_pop
 age_noise_eqs = Symbolics.scalarize(0 .* ages_pop)
+mort_noise_eqs = Symbolics.scalarize(0 .* cum_mort_pop)
 # Equations for how health propagates from region to region
 region_eqs = Matrix{Equation}(undef, num_regions, num_regions)
 for i in 1:num_regions
@@ -91,34 +97,37 @@ for i in 1:num_regions
         end
         region_eqs[i, j] = D(health_region[i, j]) ~ Θ_region * (avg_surrounging_health /
                                                                 num_neighbors -
-                                                                health_region[i, j]) -
-                                                    σ_region^2 / 2
+                                                                health_region[i, j])
     end
 end
 region_noise_eqs = Symbolics.scalarize(health_region .* σ_region)
 eqs = [Symbolics.scalarize(age_eqs)...,
        Symbolics.scalarize(mort_eqs)...,
        Symbolics.scalarize(region_eqs)...]
-noiseeqs = [region_noise_eqs...]
+noiseeqs = [age_noise_eqs..., mort_noise_eqs..., region_noise_eqs...]
 # noiseeqs = [0.01σ]
 @named de = SDESystem(eqs, noiseeqs, t,
                       [ages_pop..., cum_mort_pop..., health_region...],
-                      [μ_env, Θ_region, σ_region]; tspan=(0, 10.0))
+                      [μ_env, μ_A, μ_B, Θ_region, σ_region]; tspan=(0, 50.0))
 
 # u0map = [health => 1.0,
 #          pop => repeat([1.0], length(pop))]
-rng = MersenneTwister(20230326)
 init_ages = rand(rng, pop_size) .* 60
 init_health = exp.(randn(rng, num_regions, num_regions) / 10)
+death_chances = rand(rng, pop_size)
 u0map = [Symbolics.scalarize(ages_pop .=> init_ages)...,
          Symbolics.scalarize(cum_mort_pop .=> 0)...,
          Symbolics.scalarize(health_region .=> init_health)...]
-parammap = [μ_env => 1e-4,
-            Θ_region => 0.2,
+parammap = [μ_env => 7e-4,
+            μ_A => 2e-5,
+            μ_B => 0.1,
+            Θ_region => 0.1,
             σ_region => 0.1]
 
-prob = SDEProblem(de, u0map, (0.0, 10.0), parammap)
+prob = SDEProblem(de, u0map, (0.0, 50.0), parammap)
 @time sol = solve(prob, SOSRI())
+plot(sol; idxs=health_indices)
+mean(sol(50; idxs=health_indices))
 ages_indices = zeros(Int, length(ages_pop))
 syms = SciMLBase.getsyms(sol)
 for i in 1:length(ages_pop)
@@ -134,31 +143,6 @@ for i in 1:num_regions
         health_indices[i, j] = SciMLBase.sym_to_index(health_region[i, j], syms)
     end
 end
-sol(10; idxs=health_indices)
-# example for julia lang
-@variables t1 x(t1)[1:10]
-@parameters μ σ
-Dx = Differential(t1)
-x_eq = Symbolics.scalarize(Dx.(x) .~ 1)
-x_noise_eq = Symbolics.scalarize(x .* σ)
-@named sde_sys = SDESystem(x_eq,
-                           x_noise_eq, t1,
-                           [x...],
-                           [μ, σ]; tspan=(0, 10.0))
-sde_prob = SDEProblem(sde_sys, Symbolics.scalarize(x .=> 1), (0.0, 10.0),
-                      [μ => 1, σ => 0.2])
-sde_sol = solve(sde_prob, SOSRI())
-indices = []
-for i in 1:2
-    push!(indices, SciMLBase.sym_to_index(x[i], SciMLBase.getsyms(sde_sol)))
-end
-sde_sol(0.5; idxs=indices)
-plot(sde_sol; idxs=x[1:2])
-plot(sde_sol)
-@named ode_sys = ODESystem([Symbolics.scalarize(x_eq)...], t1,
-                           [x...],
-                           [μ, σ]; tspan=(0, 10.0))
-plot(sol; idxs=ages_pop[1:2])
-plot(sol; idxs=[health, pop])
-@syms (ages_pop(t))[1](var, var2)
-sol.du[1]
+exp.(.-sol(50; idxs=mort_indices))
+
+scatter(sol(50; idxs=ages_indices), exp.(.-sol(50; idxs=mort_indices)))
