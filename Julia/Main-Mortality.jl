@@ -3,18 +3,22 @@ using Plots
 using Random
 using SciMLBase
 using StatsPlots
+using Statistics
 ## Hypothetical mortatlity Example
 #=
 To-Do:
 - Effect of wealth on constant and age increasing hazards
+- Fit parameters with traditional methods
+- 
 - Regime Switching
+- Remove symbolics since it has issues with larger datasets
 =#
 
 @parameters μ_env μ_A μ_B
 @parameters Θ_region σ_region
-@parameters μ_wealth σ_wealth Θ_wealth_eff σ_wealth_eff
-all_params = (; μ_env, μ_A, μ_B, Θ_region, σ_region, μ_wealth, σ_wealth, Θ_wealth_eff,
-              σ_wealth_eff)
+@parameters μ_wealth σ_wealth Θ_wealth Θ_wealth_eff σ_wealth_eff
+all_params = (; μ_env, μ_A, μ_B, Θ_region, σ_region, μ_wealth, Θ_wealth, σ_wealth,
+              Θ_wealth_eff, σ_wealth_eff)
 pop_size = 1_000
 num_regions = 4
 @variables t
@@ -33,10 +37,8 @@ health_region_pop = [health_region[x, y] for (x, y) in zip(loc_pop_x, loc_pop_y)
 age_eqs = D.(ages_pop) .~ 1
 mort_eqs = D.(cum_mort_pop) .~ (μ_A .* exp.(μ_B .* ages_pop) .+ μ_env) .*
                                health_region_pop .* wealth_efficacy .*
-                               exp.((wealth_pop .- sum(wealth_pop) / length(wealth_pop)) ./
-                                    sqrt(sum(wealth_pop)^2 / length(wealth_pop) -
-                                         sum(wealth_pop) / length(wealth_pop)))
-wealth_eqs = D.(wealth_pop) .~ μ_wealth
+                               exp.(.-wealth_pop)
+wealth_eqs = D.(wealth_pop) .~ μ_wealth .* wealth_pop .+ Θ_wealth .* (1 .- wealth_pop)
 wealth_eff_eq = D(wealth_efficacy) ~ Θ_wealth_eff * (1 - wealth_efficacy)
 age_noise_eqs = Symbolics.scalarize(0 .* ages_pop)
 mort_noise_eqs = Symbolics.scalarize(0 .* cum_mort_pop)
@@ -86,7 +88,7 @@ noiseeqs = [age_noise_eqs..., mort_noise_eqs..., wealth_noise_eqs..., region_noi
 #          pop => repeat([1.0], length(pop))]
 init_ages = rand(rng, pop_size) .* 60
 init_health = exp.(randn(rng, num_regions, num_regions) / 10)
-init_wealth = randn(rng, pop_size)
+init_wealth = exp.(randn(rng, pop_size) / 10)
 death_chances = rand(rng, pop_size)
 u0map = [Symbolics.scalarize(all_vars.ages_pop .=> init_ages)...,
          Symbolics.scalarize(all_vars.cum_mort_pop .=> 0)...,
@@ -100,11 +102,12 @@ parammap = [μ_env => 7e-4,
             σ_region => 0.1,
             μ_wealth => 0,
             σ_wealth => 0.2,
+            Θ_wealth => 0.2,
             Θ_wealth_eff => 0.1,
             σ_wealth_eff => 0.2]
 
 prob = SDEProblem(de, u0map, (0.0, 100.0), parammap)
-@time sol = solve(prob, SOSRI())
+@time sol = solve(prob, SOSRI());
 
 ages_indices = zeros(Int, length(ages_pop))
 syms = SciMLBase.getsyms(sol)
@@ -130,4 +133,4 @@ exp.(.-sol(100; idxs=mort_indices))
 plot(sol; idxs=health_indices)
 mean(sol(50; idxs=health_indices))
 
-scatter(sol(100; idxs=ages_indices), exp.(.-sol(100; idxs=mort_indices)))
+scatter(sol(00; idxs=ages_indices), exp.(.-sol(50; idxs=mort_indices)))
