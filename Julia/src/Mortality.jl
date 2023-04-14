@@ -68,8 +68,8 @@ function true_drift!(du, u, p, t)
     ## population age and mortality
     du[p.ind.age] .= 1
     du[p.ind.mort] .= (μ_A .* exp.(μ_B .* u[p.ind.age]) .+ μ_env) ./# Gompertz-Makeham mortality
-                      u[p.ind.loc] # higher health regions die slower
-
+                      u[p.ind.loc] .* # higher health regions die slower
+                      exp.(.-u[p.ind.wealth_eff] .* u[p.ind.wealth])
     return nothing
 end
 function true_noise!(du, u, p, t)
