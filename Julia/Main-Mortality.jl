@@ -1,4 +1,3 @@
-using StochasticDiffEq
 using Plots
 using Random
 using SciMLBase
@@ -7,24 +6,29 @@ using Statistics
 using DataDrivenDiffEq
 using OrdinaryDiffEq
 using DataDrivenSR
+using DiffEqFlux
+using Lux
+using Flux
 include("src/Mortality.jl")
 using ..Mort: Mort
 ## Hypothetical mortatlity Example
 #=
 To-Do:
 - Fit parameters with traditional methods
+- Fit parameters with deep learning methods
 - Fit parameters with diffEq methods
 - Regime Switching
 - Update parameter fitting
 =#
-
-ps = Mort.gen_params(; μ_env=7e-4, μ_A=2e-5, μ_B=0.1,
-                     Θ_region=0.1, σ_region=0.1,
-                     μ_wealth=0, σ_wealth=0.2, Θ_wealth=0.2,
-                     Θ_wealth_eff=0.1, σ_wealth_eff=0.2,
-                     pop_size=1_000, num_regions=10)
+tspan = (0.0, 100.0)
+ps = Mort.gen_params(; μ_env=7e-4, μ_A=2e-5, μᵦ₁=0.02, μᵦ₂=0.03, μᵦ₃=0.05,
+                     d1_cure_chance=0.05, d2_cure_chance=0.05, d3_cure_chance=0.05,
+                     cure_1_eff=0.2, cure_2_eff=0.1, cure_3_eff=0.05,
+                     pop_size=10_000)
 u0 = Mort.generate_u0(ps)
-sde_prob = SDEProblem(Mort.true_drift!, Mort.true_noise!, u0, (0.0, 100.0), ps)
-@time sol = solve(sde_prob, SOSRI(); saveat=0:100);
-plot(sol; idxs=ps.ind.wealth_eff)
-sol(100; idxs=ps.ind.wealth)
+ode_prob = ODEProblem(Mort.true_drift!, u0, tspan, ps)
+@time sol = solve(ode_prob, Tsit5(); saveat=0:100);
+sol_dead = Lux.gpu.(Mort.gen_mort_data(sol))
+neural_prob = Mort.gen_model(10, u0, tspan; device=Lux.gpu)
+@time neural_sol_arr = Mort.neural_sol(neural_prob, sol)
+@time Mort.loss(neural_prob, sol_dead)

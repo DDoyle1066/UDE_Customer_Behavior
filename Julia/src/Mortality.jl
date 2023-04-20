@@ -2,91 +2,140 @@ module Mort
 using Random
 using SparseArrays
 using StatsBase
-function get_indices(pop_size::Int, num_regions::Int; seed=1)
-    rng = MersenneTwister(seed)
+using OrdinaryDiffEq
+using Lux
+# defined indices for parameters
+μ_env_ind, μ_A_ind, μᵦ₁_ind, μᵦ₂_ind, μᵦ₃_ind,
+cure_1_eff_ind, cure_2_eff_ind, cure_3_eff_ind = 1:8
+function gen_indices(pop_size::Int)
     age_indices = 1:pop_size
     mort_indices = ((maximum(age_indices) + 1):(maximum(age_indices) + pop_size))
     wealth_indices = ((maximum(mort_indices) + 1):(maximum(mort_indices) + pop_size))
-    health_indices = zeros(Int, num_regions, num_regions)
-    for i in 1:num_regions
-        for j in 1:num_regions
-            health_indices[i, j] = i + (j - 1) * num_regions + maximum(wealth_indices)
-        end
-    end
-    wealth_eff_index = maximum(health_indices) + 1
-    loc = sample(rng, health_indices, pop_size)
-    return (; age=age_indices, mort=mort_indices, wealth=wealth_indices,
-            health=health_indices, wealth_eff=wealth_eff_index, loc=loc)
+    global ind = (; age=age_indices, mort=mort_indices, wealth=wealth_indices)
+    return nothing
 end
-function gen_params(; μ_env, μ_A, μ_B,
-                    Θ_region, σ_region,
-                    μ_wealth, σ_wealth, Θ_wealth, Θ_wealth_eff, σ_wealth_eff,
-                    pop_size::Int, num_regions::Int)
-    ps = (; μ_env, μ_A, μ_B,
-          Θ_region, σ_region,
-          μ_wealth, σ_wealth, Θ_wealth,
-          Θ_wealth_eff, σ_wealth_eff,
-          ind=Mort.get_indices(pop_size, num_regions),
-          pop_size, num_regions)
+function thiele(ages;
+                a=0.02474,
+                b=0.3,
+                c=0.002,
+                d=0.5,
+                e=25,
+                f=2e-5,
+                g=0.1)
+    return @. a * exp(-b * ages) + c * exp(-0.5 * d * (ages - e)^2) + f * exp(g * ages)
+end
+function gen_params(; μ_env, μ_A, μᵦ₁, μᵦ₂, μᵦ₃,
+                    d1_cure_chance, d2_cure_chance, d3_cure_chance,
+                    cure_1_eff, cure_2_eff, cure_3_eff,
+                    pop_size::Int, seed=1)
+    rng = MersenneTwister(seed)
+    global d1_cure_time = -log(rand(rng)) / d1_cure_chance
+    global d2_cure_time = -log(rand(rng)) / d2_cure_chance
+    global d3_cure_time = -log(rand(rng)) / d3_cure_chance
+    Mort.gen_indices(pop_size)
+    global pop_μᵦ = zeros(pop_size)
+    ps = zeros(cure_3_eff_ind)
+    ps = [μ_env, μ_A, μᵦ₁, μᵦ₂, μᵦ₃,
+          cure_1_eff, cure_2_eff, cure_3_eff]
+
     return ps
-end
-function true_drift!(du, u, p, t)
-    μ_A, μ_B, μ_env = p.μ_A, p.μ_B, p.μ_env
-    Θ_region = p.Θ_region
-    μ_wealth, Θ_wealth = p.μ_wealth, p.Θ_wealth
-    Θ_wealth_eff = p.Θ_wealth_eff
-    num_regions = p.num_regions
-    ## Propogate health from region to region
-    for i in 1:num_regions
-        for j in 1:num_regions
-            avg_surrounging_health = 0
-            num_neighbors = 0
-            if i > 1
-                avg_surrounging_health += u[p.ind.health[i - 1, j]]
-                num_neighbors += 1
-            end
-            if i < num_regions
-                avg_surrounging_health += u[p.ind.health[i + 1, j]]
-                num_neighbors += 1
-            end
-            if j > 1
-                avg_surrounging_health += u[p.ind.health[i, j - 1]]
-                num_neighbors += 1
-            end
-            if j < num_regions
-                avg_surrounging_health += u[p.ind.health[i, j + 1]]
-                num_neighbors += 1
-            end
-            du[p.ind.health[i, j]] = Θ_region * (avg_surrounging_health / num_neighbors -
-                                                 u[p.ind.health[i, j]])
-        end
-    end
-    ## wealth efficacy
-    du[p.ind.wealth_eff] = Θ_wealth_eff * (1 - u[p.ind.wealth_eff])
-    ## population wealth
-    du[p.ind.wealth] .= μ_wealth .* u[p.ind.wealth] .+ Θ_wealth .* (1 .- u[p.ind.wealth])
-    ## population age and mortality
-    du[p.ind.age] .= 1
-    du[p.ind.mort] .= (μ_A .* exp.(μ_B .* u[p.ind.age]) .+ μ_env) ./# Gompertz-Makeham mortality
-                      u[p.ind.loc] .* # higher health regions die slower
-                      exp.(.-u[p.ind.wealth_eff] .* u[p.ind.wealth])
-    return nothing
-end
-function true_noise!(du, u, p, t)
-    du[p.ind.health] .= u[p.ind.health] .* p.σ_region
-    du[p.ind.wealth] .= u[p.ind.wealth] .* p.σ_wealth
-    du[p.ind.wealth_eff] = u[p.ind.wealth_eff] * p.σ_wealth_eff
-    return nothing
 end
 function generate_u0(ps; seed=1)
     rng = MersenneTwister(seed)
-    u0 = zeros(ps.ind.wealth_eff)
-    u0[ps.ind.age] .= rand(rng, ps.pop_size) * 60
-    u0[ps.ind.mort] .= 0
-    u0[ps.ind.wealth] .= exp.(randn(rng, ps.pop_size) / 10)
-    u0[ps.ind.health] .= exp.(randn(rng, size(ps.ind.health)) ./ 10)
-    u0[ps.ind.wealth_eff] = 1.0
+    u0 = zeros(maximum(ind.wealth))
+    pop_size = length(pop_μᵦ)
+    u0[ind.age] .= rand(rng, pop_size) * 60
+    u0[ind.mort] .= 0
+    u0[ind.wealth] .= sample(rng, 1:20, pop_size)
     return u0
 end
-
+function true_drift!(du, u, p, t)
+    μ_env = p[μ_env_ind]
+    μ_A, μᵦ₁, μᵦ₂, μᵦ₃ = p[μ_A_ind], p[μᵦ₁_ind], p[μᵦ₂_ind], p[μᵦ₃_ind]
+    pop_μᵦ .= 0
+    ## population age and mortality
+    du[ind.age] .= 1
+    ## determining population exposure  
+    if t >= d1_cure_time
+        if t >= d1_cure_time + 20
+            wealth_pct = max(min((t - d1_cure_time - 20), 6), 0) + 10
+            pop_μᵦ .+= μᵦ₁ .*
+                       ifelse.(u[ind.wealth] .<= wealth_pct, ((1 - p[cure_1_eff_ind])),
+                               1.0)
+        else
+            pop_μᵦ .+= μᵦ₁ .* ifelse.(u[ind.wealth] .<= 4, (1 - p[cure_1_eff_ind]), 1.0)
+        end
+    else
+        pop_μᵦ .+= μᵦ₁
+    end
+    if t >= d2_cure_time
+        if t >= d2_cure_time + 20
+            wealth_pct = max(min((t - d2_cure_time - 20), 6), 0) + 10
+            pop_μᵦ .+= μᵦ₂ .*
+                       ifelse.(u[ind.wealth] .<= wealth_pct, (1 - p[cure_1_eff_ind]),
+                               1.0)
+        else
+            pop_μᵦ .+= μᵦ₂ .* ifelse.(u[ind.wealth] .<= 4, (1 - p[cure_1_eff_ind]), 1.0)
+        end
+    else
+        pop_μᵦ .+= μᵦ₂
+    end
+    if t >= d3_cure_time
+        if t >= d3_cure_time + 20
+            wealth_pct = max(min((t - d3_cure_time - 20), 6), 0) + 10
+            pop_μᵦ .+= μᵦ₃ .*
+                       ifelse.(u[ind.wealth] .<= wealth_pct, ((1 - p[cure_1_eff_ind])), 1.0)
+        else
+            pop_μᵦ .+= μᵦ₃ .* ifelse.(u[ind.wealth] .<= 4, (1 - p[cure_1_eff_ind]), 1.0)
+        end
+    else
+        pop_μᵦ .+= μᵦ₃
+    end
+    du[ind.mort] .= (μ_A .* exp.(pop_μᵦ .* u[ind.age]) .+ μ_env)
+    return nothing
+end
+# sol = Main.sol
+function gen_mort_data(sol::ODESolution; seed=1)
+    rng = MersenneTwister(seed)
+    cum_mort_probs = 1 .- exp.(.-hcat([x[ind.mort] for x in sol.u]...))
+    death_chance = rand(rng, size(cum_mort_probs)[1])
+    dead = cum_mort_probs .> death_chance
+    died = (dead[:, 2:end] .== 1) .& (dead[:, 1:(end - 1)] .== 0)
+    @assert sum(died) == sum(dead[:, end])
+    return dead[:, 1:(end - 1)], died
+end
+function transform_x(x)
+    u, t = x
+    # println(size(vcat(x .^3,t)))
+    return vcat(u[ind.age]', u[ind.wealth]', repeat([t], length(ind.wealth))')
+end
+function gen_model(hidden_size, u0, tspan; seed=1, device=cpu)
+    @assert device ∈ [cpu, gpu] "Device should be one of gpu or cpu"
+    rng = MersenneTwister()
+    model = Lux.Chain(transform_x,
+                      Lux.Dense(3, hidden_size, Lux.relu),
+                      Lux.Dense(hidden_size, 1, exp))
+    p, st = device(Lux.setup(rng, model))
+    function dudt!(du, u, p, t)
+        du[ind.age] .= 1
+        du[ind.mort] .= vec(model((u, t), p, st)[1]')
+        return du
+    end
+    prob = ODEProblem(dudt!, device(u0), tspan, p)
+    return prob
+end
+neural_sol(neural_prob, sol) = Array(solve(neural_prob, Tsit5(); saveat=sol.t))
+function loss(neural_prob, sol_dead)
+    neural_sol_arr = neural_sol(neural_prob, sol)
+    neural_mort_probs = 1 .-
+                        exp.(.-(neural_sol_arr[ind.mort, 2:end] .-
+                                neural_sol_arr[ind.mort, 1:(end - 1)]))
+    neural_mort_probs = min.(1 - 1.0f-12,
+                             max.(1.0f-12,
+                                  1 .-
+                                  exp.(.-(neural_sol_arr[ind.mort, 2:end] .-
+                                          neural_sol_arr[ind.mort, 1:(end - 1)]))))
+    log_loss = -sum((log.(neural_mort_probs) .* (sol_dead[2]) .+ log.(1 .- neural_mort_probs) .* (1 .- sol_dead[2]))[sol_dead[1] .== 0])
+    return log_loss
+end
 end
