@@ -4,6 +4,7 @@ using SparseArrays
 using StatsBase
 using OrdinaryDiffEq
 using Lux
+using ComponentArrays
 # defined indices for parameters
 μ_env_ind, μ_A_ind, μᵦ₁_ind, μᵦ₂_ind, μᵦ₃_ind,
 cure_1_eff_ind, cure_2_eff_ind, cure_3_eff_ind = 1:8
@@ -111,27 +112,30 @@ function transform_x(x)
 end
 function gen_model(hidden_size, u0, tspan; seed=1, device=cpu)
     @assert device ∈ [cpu, gpu] "Device should be one of gpu or cpu"
-    rng = MersenneTwister()
+    rng = MersenneTwister(seed)
     model = Lux.Chain(transform_x,
                       Lux.Dense(3, hidden_size, Lux.relu),
                       Lux.Dense(hidden_size, 1, exp))
-    p, st = device(Lux.setup(rng, model))
+    p, st = Lux.setup(rng, model)
+    p = device(ComponentArray(p))
+    st = device(st)
     function dudt!(du, u, p, t)
         du[ind.age] .= 1
         du[ind.mort] .= vec(model((u, t), p, st)[1]')
         return du
     end
     prob = ODEProblem(dudt!, device(u0), tspan, p)
-    return prob
+    return prob, p, model
 end
 neural_sol(neural_prob, sol) = Array(solve(neural_prob, Tsit5(); saveat=sol.t))
-function loss(neural_prob, sol_dead)
+#=
+neural_prob = Main.neural_prob
+sol_dead = Main.sol_dead
+=#
+function loss(neural_prob, sol, sol_dead)
     neural_sol_arr = neural_sol(neural_prob, sol)
-    neural_mort_probs = 1 .-
-                        exp.(.-(neural_sol_arr[ind.mort, 2:end] .-
-                                neural_sol_arr[ind.mort, 1:(end - 1)]))
-    neural_mort_probs = min.(1 - 1.0f-12,
-                             max.(1.0f-12,
+    neural_mort_probs = min.(1 - 1.0f-6,
+                             max.(1.0f-6,
                                   1 .-
                                   exp.(.-(neural_sol_arr[ind.mort, 2:end] .-
                                           neural_sol_arr[ind.mort, 1:(end - 1)]))))
