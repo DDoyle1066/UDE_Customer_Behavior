@@ -3,7 +3,7 @@ using Random
 using SparseArrays
 using StatsBase
 using OrdinaryDiffEq
-using Lux
+using Flux
 using ComponentArrays
 # defined indices for parameters
 μ_env_ind, μ_A_ind, μᵦ₁_ind, μᵦ₂_ind, μᵦ₃_ind,
@@ -15,15 +15,25 @@ function gen_indices(pop_size::Int)
     global ind = (; age=age_indices, mort=mort_indices, wealth=wealth_indices)
     return nothing
 end
-function thiele(ages;
+t = 15
+function thiele(ages, t;
                 a=0.02474,
                 b=0.3,
                 c=0.002,
                 d=0.5,
                 e=25,
                 f=2e-5,
-                g=0.1)
-    return @. a * exp(-b * ages) + c * exp(-0.5 * d * (ages - e)^2) + f * exp(g * ages)
+                g_1=0.08,
+                g_2=0.06,
+                g_3=0.03)
+    t_1_cure_time = 5
+    t_2_cure_time = 10
+    t_3_cure_time = 15
+    g = g_1 * (1 - max(min((t - t_1_cure_time) / 10, 0.5), 0)) +
+        g_2 * (1 - max(min((t - t_2_cure_time) / 10, 0.5), 0)) +
+        g_3 * (1 - max(min((t - t_3_cure_time) / 10, 0.5), 0))
+    return @. a * exp(-b * ages) + c * exp(-0.5 * d * (ages - e)^2) +
+              f * exp(g * ages)
 end
 function gen_params(; μ_env, μ_A, μᵦ₁, μᵦ₂, μᵦ₃,
                     d1_cure_chance, d2_cure_chance, d3_cure_chance,
@@ -113,21 +123,20 @@ end
 function gen_model(hidden_size, u0, tspan; seed=1, device=cpu)
     @assert device ∈ [cpu, gpu] "Device should be one of gpu or cpu"
     rng = MersenneTwister(seed)
-    model = Lux.Chain(transform_x,
-                      Lux.Dense(3, hidden_size, Lux.relu),
-                      Lux.Dense(hidden_size, 1, exp))
-    p, st = Lux.setup(rng, model)
-    p = device(ComponentArray(p))
-    st = device(st)
+    global restruct
+    model = Chain(transform_x,
+                  Dense(3, hidden_size; init=Flux.glorot_uniform(rng)),
+                  Dense(hidden_size, 1, exp; init=Flux.glorot_uniform(rng)))
+    p, restruct = Flux.destructure(model)
     function dudt!(du, u, p, t)
+        model_new = restruct(p)
         du[ind.age] .= 1
-        du[ind.mort] .= vec(model((u, t), p, st)[1]')
+        du[ind.mort] .= vec(model_new((u, t))')
         return du
     end
-    prob = ODEProblem(dudt!, device(u0), tspan, p)
-    return prob, p, model
+    prob = ODEProblem(dudt!, u0, tspan, p)
+    return prob
 end
-neural_sol(neural_prob, sol) = Array(solve(neural_prob, Tsit5(); saveat=sol.t))
 #=
 neural_prob = Main.neural_prob
 sol_dead = Main.sol_dead

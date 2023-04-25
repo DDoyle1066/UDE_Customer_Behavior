@@ -2,7 +2,7 @@
 
 julia_version = "1.8.5"
 manifest_format = "2.0"
-project_hash = "f4e323b843d947878902f9e7ed7f9eb6e8be0fbd"
+project_hash = "ab826a8debc91f30db9cc6ee8bf355d6d6a7cd05"
 
 [[deps.AbstractAlgebra]]
 deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
@@ -2465,6 +2465,12 @@ version = "0.5.5"
 git-tree-sha1 = "cd1659ba0d57b71a464a29e64dbc67cfe83d54e7"
 uuid = "76eceee3-57b5-4d4a-8e66-0e911cebbf60"
 version = "1.6.1"
+
+[[deps.XML]]
+deps = ["AbstractTrees", "Dates", "Downloads", "OrderedCollections"]
+git-tree-sha1 = "8ec5c77816d33e98c59019ed14f92211b3ab786f"
+uuid = "72c71f33-b9b6-44de-8c94-c961784809e2"
+version = "0.1.3"
 
 [[deps.XML2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Pkg", "Zlib_jll"]
