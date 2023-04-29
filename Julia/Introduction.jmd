@@ -1,6 +1,17 @@
-# What is supervised learning?
-Supervised Learning is the
+# Supervised Learning and Project Purpose
+Supervised Learning is a subset of machine learning that people are likely the most familiar with.
+It involves taking some set of explanatory/independent variables and using them to predict some
+independent variable of interest. If the independent variable is a number this is regression and
+if it is a class (Yes/No, Future Occupation, etc.) then it is classification. Common techniques are:
+- Linear Models
+- Neural Networks
+- Random Forests
+- Gradient Boosting Machines 
+There are many factors to consider when building a supervised learning model. The main focus of this 
+project is understanding the importance of correct structural identification in these problems.
 ## Polynomial example
+Below is a simple regression problem where we are trying to identify the right model to use 
+given 10 data points with an average that is a 3rd degree polynomial with some noise added in.
 ### Data generation
 ```julia
 using Random, Plots
@@ -14,7 +25,14 @@ data = avg .+ ϵ .* randn(rng, length(x))
 scatter(x, data, label = "Data", xaxis = "x", yaxis = "y", title = "3rd Degree Polynomial")
 plot!(x, avg, label = "True average")
 ```
-### Fitting models
+### Overfitting
+Below are the results of fitting a variety of polynomials. If one assumes a low degree polynomial, the
+model will underfit and not capture the curvature in the data. If one assumes a high degree polynomial, 
+the model, while eventually passing through every data point and achieving "perfect" fit, behaves 
+very erratically for intermediate predictions and would fail on any attempt to predict new data.
+
+It is important to understang how complex the system under consideration likely is. An assumption
+that a system is either drastically more or less complex than reality can lead to large errors.
 ```julia
 using GLM
 function plot_poly_fit(degree)
@@ -46,7 +64,13 @@ gif(anim, fps = 1.5)
 ```
 ## Classification example
 ### Data Generation
-Consider the following classification problem where 
+Consider the following classification problem below where the blue points need to be classified.
+
+While it is easy to visually distinguish the sections, building a linear model to separate the
+classes would likely prove difficult due to the nonlinear nature of the problem. This issue
+compounds if the problem had more dimensions, since manually generating
+a combination of linear features based on the x & y coordinates may not be easy without the easy 
+visualization available in two dimensions.
 ```julia
 using Colors
 x_mat = rand(rng, Float64, (5000, 2))*2 .- 1
@@ -60,10 +84,71 @@ scatter(x_mat[:,1], x_mat[:,2], color = colors, group = legend_labels,
         title = "Problem in Cartesian Coordinates")
 ```
 ### Coordinate Transformation
+The best approach to this issue is a recognition that this problem is more aptly expressed 
+in polar coordinates. Transforming the problem simplifies the classification problem to a rule
+where points are flagged if the radius is less than 0.75 and Θ is greater than 0.
+
+Identifying the correct structure is useful here as it allows our model to be simpler and more 
+reflective of reality in polar space than it would otherwise be in cartesian space.
 ```julia
 scatter(polar_mat[:,1], polar_mat[:,2], color = colors,  group = legend_labels,
         legend = :outertopright,
-        xaxis = "Radius", yaxis = "θ", title = "Problem in Polar coordinates")
+        xaxis = "Radius", yaxis = "Θ", title = "Problem in Polar Coordinates")
 ```
-## Deep learning 
+## Deep learning
+Deep learning/neural networks have exploded in popularity in the last two decades due to improved computation compabilities
+that have in turn led to strides in computer vision, natural language processing and many other topics. These advancements
+are due to strucural assumptions built into deep learning models and the general characteristic of
+neural networks to learn anything given enough complexity.
 
+### Structural assumptions
+A key component of these advances is an improvemtn in the structural representation of the
+problem. A detailed accounting is available in the book on [Geometric Deep Learning](https://arxiv.org/pdf/2104.13478.pdf)
+by Michael M. Bronstein, Joan Bruna, Taco Cohen and Petar Veličković. The short version is that 
+assumptions about the structure of the problem greatly reduce the complexity of problems that involve millions
+of pixels, time points or words by recognizing how different problems can be invariant to different 
+transformations. For example, convolutional neural nets in computer vision exploit translational invariance in its inputs. 
+Instead of processing each pixel as a distinct input, they recognize the grid like structure of an image and instead
+pass filters over the input to recognize basic shapes in an image. Deeper layers recognize combinations
+of basic shapes until eventually complex images can be recognized.
+
+### [Universal Approximation Theorem](https://en.wikipedia.org/wiki/Universal_approximation_theorem)
+A key component of deep learning's success is that a neural network has a very useful property. It
+is able to approximate any function given a sufficiently large network and the right parameters. 
+In today's environment of Big Data the amount of data can be used to train truly impressive models
+that can sometimes have billions of parameters. 
+
+### Important Limitations
+The greatest strength of neural networks, their ability to flexibly incorporate a problem's structure,
+leads to its greatest weakness, namely, that their flexibility renders their "thought process" and
+generalization an inherent black box. Notable examples of this shortcoming are where Uber self-driving cars
+[killed pedestrians](https://www.pghcitypaper.com/news/ubers-self-driving-cars-cant-detect-pedestrians-who-walk-outside-of-crosswalks-says-report-16160888#:~:text=November%2011%2C%202019-,Uber's%20self%2Ddriving%20cars%20can't%20detect%20pedestrians%20who%20walk,outside%20of%20crosswalks%2C%20says%20report&text=According%20to%20a%20new%20report,the%20street%20outside%20of%20crosswalks.)
+because of the cars' inability to detect pedestrians outside of crosswalks or walking bikes. Another notable 
+research example is a computer vision model that [detected tumors](https://venturebeat.com/business/when-ai-flags-the-ruler-not-the-tumor-and-other-arguments-for-abolishing-the-black-box-vb-live/)
+only when a ruler was present in the image. Why? Because, when a tumor was present the technician would include a ruler for scale.
+
+Essentially, while deep learning has transformed the ability to model increasingly complex problems
+there is a general issue of transparency in understanding how these models will generalize when presented
+with novel environments, especially in high stakes situations such as healthcare, finance and widespread use of
+autonomous agents. 
+
+### Universal Differential Equations (UDEs)
+One technique that is used is Universal Differential Equations an idea pioneered by Chris Rackauckas
+to incorporate the benefits of deep learning in areas such as clinical trials where data is more 
+limited and understanding of causality is crucial to the study. The general UDE process is summarized below
+1. Identify know parts of a model, build a UDE
+2. Train a neural network (or other approximator) to capture the missing mechanisms
+3. Sparse identify the missterms to mechanistic terms 
+4. Verify the mechanistic terms are scientifically plausibl
+5. Get more data to verify the new terms
+
+The rest of this project goes through three examples that use this framework to automatically detect 
+the structure in the following problems:
+- Population prediction with a toy example using the Lotka-Volterra Equations.
+- Predicting COVID-19 spread in the early stages of the pandemic.
+- Predicting mortality improvement using CDC cause of death data.
+
+For those interested in more of the literature below are some useful resources
+- [Scientific Machine Learning website](https://sciml.ai/)
+- [UDE paper](https://arxiv.org/abs/2001.04385)
+- [Scientific Machine Learning tutorial from JuliaCon 2020](https://www.youtube.com/watch?v=QwVO0Xh2Hbg)
