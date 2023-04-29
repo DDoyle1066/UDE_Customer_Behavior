@@ -1,0 +1,69 @@
+# What is supervised learning?
+Supervised Learning is the
+## Polynomial example
+### Data generation
+```julia
+using Random, Plots
+rng = MersenneTwister(20230426)
+a, b, c, d = 1, .5, .25, .125
+x = (-4.5:4.5) ./ 1 |> collect
+ϵ = 2
+avg = @. a + b * x + c * x^2 + d * x^3
+data = avg .+ ϵ .* randn(rng, length(x))
+
+scatter(x, data, label = "Data", xaxis = "x", yaxis = "y", title = "3rd Degree Polynomial")
+plot!(x, avg, label = "True average")
+```
+### Fitting models
+```julia
+using GLM
+function plot_poly_fit(degree)
+    @assert degree ∈ 1:10
+    x_mat = hcat(ones(size(x)), x)
+    if degree > 1
+        for i in 2:degree
+            x_mat = hcat(x_mat, x .^ i)
+        end
+    end
+    x_expanded = range(x[1], x[end], 1000) |> collect
+    x_mat_expanded = hcat(ones(size(x_expanded)), x_expanded)
+    if degree > 1
+        for i in 2:degree
+            x_mat_expanded = hcat(x_mat_expanded, x_expanded .^ i)
+        end
+    end
+    ret_model = lm(x_mat, data)
+    preds = predict(ret_model, x_mat_expanded)
+    plt = scatter(x, data, label = "Data", xaxis = "x", yaxis = "y", title = "Polynomial of Degree: $degree")
+    plot!(x, avg, label = "True average")
+    plot!(x_expanded, preds, label = "Model of degree: $degree")
+    return plt
+end
+anim = @animate for deg in 1:10
+    plot_poly_fit(deg)
+end
+gif(anim, fps = 1.5)
+```
+## Classification example
+### Data Generation
+Consider the following classification problem where 
+```julia
+using Colors
+x_mat = rand(rng, Float64, (5000, 2))*2 .- 1
+polar_mat = hcat((@. sqrt(x_mat[:,1]^2 + x_mat[:,2]^2)), (@. atan(x_mat[:,2]/x_mat[:,1])))
+label = @. ifelse((polar_mat[:,1] <0.75) & (polar_mat[:,2] > 0), 1, 0)
+all_cols = distinguishable_colors(2, colorant"skyblue1")
+colors = ifelse.(label .== 1, all_cols[1],all_cols[2]) 
+legend_labels = ifelse.(label .== 1, "Flagged", "Not Flagged") 
+scatter(x_mat[:,1], x_mat[:,2], color = colors, group = legend_labels,
+        legend = :outertopright, xaxis = "x", yaxis = "y",
+        title = "Problem in Cartesian Coordinates")
+```
+### Coordinate Transformation
+```julia
+scatter(polar_mat[:,1], polar_mat[:,2], color = colors,  group = legend_labels,
+        legend = :outertopright,
+        xaxis = "Radius", yaxis = "θ", title = "Problem in Polar coordinates")
+```
+## Deep learning 
+

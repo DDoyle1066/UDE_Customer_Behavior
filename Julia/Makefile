@@ -1,0 +1,2 @@
+weave:
+	julia "Weave.jl"
