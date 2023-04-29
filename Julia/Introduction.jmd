@@ -144,7 +144,7 @@ limited and understanding of causality is crucial to the study. The general UDE 
 
 The rest of this project goes through three examples that use this framework to automatically detect 
 the structure in the following problems:
-- Population prediction with a toy example using the Lotka-Volterra Equations.
+- Population prediction with a toy example using the Latka-Volterra Equations.
 - Predicting COVID-19 spread in the early stages of the pandemic.
 - Predicting mortality improvement using CDC cause of death data.
 

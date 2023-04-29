@@ -1,4 +1,4 @@
-# Lotka-Volterra Problem
+# Latka-Volterra Problem
 This is a classical set of differential equations that describe a population of prey ``x``
 and predators ``y``. Their population is determined by the following parameters: 
 - α: The population growth rate of the prey
@@ -11,12 +11,11 @@ In summary:
 ``\frac{dx}{dt} = αx - βxy``
 
 ``\frac{dy}{dt} = δxy - γy``
-
-
 ## True Data
 ```julia
 
 ```
+
 ## Neural Network Fitting
 
 ## Structural Inference
