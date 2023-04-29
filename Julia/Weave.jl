@@ -1,4 +1,4 @@
 using Pkg: Pkg
 Pkg.activate(".")
 using Weave
-weave("Introduction.jmd"; out_path="html/")
+weave("Introduction.jmd"; out_path="html/", fig_path=tempname())
