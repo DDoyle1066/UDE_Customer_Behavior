@@ -1,6 +1,29 @@
-# What is supervised learning
-## Polynomial example
+# Lotka-Volterra Problem
+This is a classical set of differential equations that describe a population of prey ``x``
+and predators ``y``. Their population is determined by the following parameters: 
+- α: The population growth rate of the prey
+- β: The population loss rate of the prey as the predator population grows and eats them
+- δ: The population growth rate of the predator as the prey population grows and more food is available
+- γ: The population loss rate of the predator as the predator population 
 
-## Radians example
+In summary:
 
-## 
+``\frac{dx}{dt} = αx - βxy``
+
+``\frac{dy}{dt} = δxy - γy``
+
+
+## True Data
+```julia
+
+```
+## Neural Network Fitting
+
+## Structural Inference
+### With neural network
+
+### Without neural network
+
+## Bayesian Network Fitting
+
+## Probabilistic Structure Inference
