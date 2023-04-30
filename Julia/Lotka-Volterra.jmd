@@ -1,4 +1,6 @@
-# Latka-Volterra Problem
+# Lotka-Volterra Problem
+Before describing the context of the problem 
+
 This is a classical set of differential equations that describe a population of prey ``x``
 and predators ``y``. Their population is determined by the following parameters: 
 - α: The population growth rate of the prey
@@ -12,12 +14,30 @@ In summary:
 
 ``\frac{dy}{dt} = δxy - γy``
 ## True Data
+Before describing the context 
 ```julia
-
+using DifferentialEquations, Plots
+function lotka_volterra!(du, u, p, t)
+    x, y = u
+    α, β, δ, γ = p
+    du[1] = dx = α*x - β*x*y
+    du[2] = dy = δ*x*y - γ*y
+end
+u₀ = [0.44249296,4.6280594]
+tspan = (0.0, 3.0)
+p = [1.3, 0.9, 0.8, 1.8]
+prob = ODEProblem(latka_volterra!, u₀, tspan, p)
+sol = solve(prob, Tsit5(), saveat = range(tspan[1], tspan[2], 1000))
+sol_mat = Matrix(sol)'
+plot(sol.t, sol_mat[:,1], label = "prey")
+plot!(sol.t, sol_mat[:,2], label = "predator")
 ```
 
 ## Neural Network Fitting
+```julia
+using DataDrivenDiffEq, DiffEqFlux
 
+```
 ## Structural Inference
 ### With neural network
 
