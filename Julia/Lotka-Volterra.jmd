@@ -56,7 +56,7 @@ t = sol.t
 DX = Array(sol(sol.t, Val{1}))
 full_problem = DataDrivenProblem(X, t = t, DX = DX)
 x̄ = mean(X, dims =2)
-ϵ = 5e-3
+ϵ = 1e-2
 X_mod = X .+ (ϵ*x̄) .* randn(rng, eltype(X), size(X))
 
 plot(sol, alpha = 0.75, color = :black, label = ["True Data" nothing])
@@ -148,7 +148,7 @@ plot!(ts, transpose(Ȳ), color = :black, label = ["True Interaction" nothing])
 @variables u[1:2]
 # Generate the basis functions, multivariate polynomials up to deg 5
 # and sine
-b = [polynomial_basis(u, 5); sin.(u)]
+b = [polynomial_basis(u, 2); sin.(u)]
 basis = Basis(b,u)
 # Create the thresholds which should be used in the search process
 λ = exp10.(-10:0.01:5)
@@ -164,8 +164,8 @@ println("Sparse regression")
 full_res = solve(full_problem, basis, opt, options = DataDrivenCommonOptions(data_processing = sampler),
                 maxiters = 10000, progress = true)
 ideal_res = solve(ideal_problem, basis, opt, maxiters = 5000, progress = true)
-nn_res = solve(nn_problem, basis, opt, options = DataDrivenCommonOptions(data_processing = sampler),
-            maxiters = 10000, progress = true, allow_f_increases = false)
+nn_res = solve(nn_problem, basis, opt,
+            maxiters = 10000, progress = true)
 results = [full_res; ideal_res; nn_res]
 
 get_basis(nn_res) |> get_parameter_map
@@ -173,7 +173,7 @@ get_basis(nn_res).eqs
 get_basis(ideal_res).eqs
 get_basis(full_res) |> get_parameter_map
 
-nn_res.basis
+nn_res.basis.eqs
 
 ```
 ### With neural network
