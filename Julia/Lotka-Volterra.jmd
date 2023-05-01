@@ -37,10 +37,10 @@ function lotka_volterra!(du, u, p, t)
     du[1] = dx = α*x - β*x*y
     du[2] = dy = δ*x*y - γ*y
 end
-u₀ = [1.0,1.0]
+u₀ = [0.44,0.37]
 tspan = (0.0, 5.0)
 p = [1.5, 1.0, 3.0, 1.0]
-prob = ODEProblem(lotka_volterra!, u₀, tspan, p) 
+prob = ODEProblem{true, SciMLBase.FullSpecialize}(lotka_volterra!, u₀, tspan, p) 
 sol = solve(prob, Tsit5(), abstol=1e-8, reltol=1e-8, saveat=0.1)
 sol_mat = Matrix(sol)'
 plot(sol.t, sol_mat[:,1], label = "prey")
@@ -54,7 +54,7 @@ rng = MersenneTwister(20230430)
 X = Array(sol)
 t = sol.t
 DX = Array(sol(sol.t, Val{1}))
-full_problem = DataDrivenProblem(X, t = t, DX = DX)
+full_problem = DataDrivenProblem(sol)
 x̄ = mean(X, dims =2)
 ϵ = 1e-2
 X_mod = X .+ (ϵ*x̄) .* randn(rng, eltype(X), size(X))
@@ -66,10 +66,8 @@ scatter!(t, transpose(X_mod), color = :red, label = ["Noisy Data" nothing])
 ```julia
 rbf(x) = exp.(.-(x.^2))
 NN = Lux.Chain(
-    Lux.Dense(2, 5, tanh),
-    Lux.Dense(5, 5, tanh),
-    Lux.Dense(5, 5, tanh),
-    Lux.Dense(5, 2)
+    Lux.Dense(2, 20, tanh),
+    Lux.Dense(20, 2)
 )
 p_nn, st = Lux.setup(rng, NN)
 p_nn = ComponentArray(p_nn)
@@ -79,7 +77,7 @@ function ude_dynamics!(du, u, p_nn, t, p_true)
     du[2] = -p_true[4]*u[2] + û[2]
 end
 nn_dynamics!(du, u, p_nn, t) = ude_dynamics!(du, u, p_nn, t, p)
-prob_nn = ODEProblem(nn_dynamics!, X_mod[:,1], tspan, p_nn)
+prob_nn = ODEProblem{true, SciMLBase.FullSpecialize}(nn_dynamics!, X_mod[:,1], tspan, p_nn)
 function nn_predict(θ, X = X_mod[:,1], T = t)
     _prob = remake(prob_nn, u0 = X, tspan = (T[1], T[end]), p = θ)
     _sol = solve(_prob, Tsit5(),
@@ -114,7 +112,11 @@ res1 = Optimization.solve(optprob, Optimisers.ADAM(0.1), callback = callback, ma
 #println("Training loss after $(length(losses)) iterations: $(losses[end])")
 # Train with BFGS
 optprob2 = Optimization.OptimizationProblem(optf, res1.minimizer)
-res2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm=0.01), callback=callback, maxiters = 5000, 
+res2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm=0.1), callback=callback, maxiters = 5000, 
+    allow_f_increases = false)
+# Finish with ADAM with very small step size 
+optprob3 = Optimization.OptimizationProblem(optf, res2.minimizer)
+res3 = Optimization.solve(optprob3, Optimisers.ADAM(0.001), callback=callback, maxiters = 500, 
     allow_f_increases = false)
 #println("Final training loss after $(length(losses)) iterations: $(losses[end])")
 p_trained = res2.minimizer
@@ -148,7 +150,7 @@ plot!(ts, transpose(Ȳ), color = :black, label = ["True Interaction" nothing])
 @variables u[1:2]
 # Generate the basis functions, multivariate polynomials up to deg 5
 # and sine
-b = [polynomial_basis(u, 2); sin.(u)]
+b = [polynomial_basis(u, 5); u]
 basis = Basis(b,u)
 # Create the thresholds which should be used in the search process
 λ = exp10.(-10:0.01:5)
@@ -157,8 +159,10 @@ opt = STLSQ(λ)
 # Define different problems for the recovery
 ideal_problem = DirectDataDrivenProblem(X̂, Ȳ)
 nn_problem = DirectDataDrivenProblem(X̂, Ŷ)
-
-sampler = DataProcessing(split = 0.99, shuffle = true, batchsize = 4, rng = rng)
+nn_prob_new = ODEProblem{true, SciMLBase.FullSpecialize}(nn_dynamics!, X[:,1], (0, 100), p_trained)
+nn_sol_new = solve(nn_prob_new, Tsit5(), saveat = 0.1)
+nn_prob_2 = DataDrivenProblem(nn_sol_new)
+sampler = DataProcessing(split = 0.99, shuffle = true, batchsize = 10, rng = rng)
 # Test on ideal derivative data for unknown function ( not available )
 println("Sparse regression")
 full_res = solve(full_problem, basis, opt, options = DataDrivenCommonOptions(data_processing = sampler),
@@ -166,10 +170,14 @@ full_res = solve(full_problem, basis, opt, options = DataDrivenCommonOptions(dat
 ideal_res = solve(ideal_problem, basis, opt, maxiters = 5000, progress = true)
 nn_res = solve(nn_problem, basis, opt,
             maxiters = 10000, progress = true)
+nn_res_2 = solve(nn_prob_2, basis, opt,
+            maxiters = 10000, progress = true)
 results = [full_res; ideal_res; nn_res]
 
+get_basis(ideal_res) |> get_parameter_map
 get_basis(nn_res) |> get_parameter_map
 get_basis(nn_res).eqs
+get_basis(nn_res_2).eqs
 get_basis(ideal_res).eqs
 get_basis(full_res) |> get_parameter_map
 
