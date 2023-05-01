@@ -1,5 +1,7 @@
 # Lotka-Volterra Problem
+Code is based on the example [here](https://github.com/ChrisRackauckas/universal_differential_equations/blob/master/LotkaVolterra/scenario_1.jl)
 Before describing the context of the problem 
+
 
 This is a classical set of differential equations that describe a population of prey ``x``
 and predators ``y``. Their population is determined by the following parameters: 
@@ -13,32 +15,167 @@ In summary:
 ``\frac{dx}{dt} = αx - βxy``
 
 ``\frac{dy}{dt} = δxy - γy``
+## Load packages
+```julia
+using OrdinaryDiffEq
+using ModelingToolkit
+using DataDrivenDiffEq
+using DataDrivenSparse
+using LinearAlgebra, ComponentArrays
+using Zygote, Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationOptimisers
+using Lux, DiffEqFlux, SciMLSensitivity
+using Plots
+using Statistics
+using Random
+```
 ## True Data
 Before describing the context 
 ```julia
-using DifferentialEquations, Plots
 function lotka_volterra!(du, u, p, t)
     x, y = u
     α, β, δ, γ = p
     du[1] = dx = α*x - β*x*y
     du[2] = dy = δ*x*y - γ*y
 end
-u₀ = [0.44249296,4.6280594]
-tspan = (0.0, 3.0)
-p = [1.3, 0.9, 0.8, 1.8]
-prob = ODEProblem(latka_volterra!, u₀, tspan, p)
-sol = solve(prob, Tsit5(), saveat = range(tspan[1], tspan[2], 1000))
+u₀ = [1.0,1.0]
+tspan = (0.0, 5.0)
+p = [1.5, 1.0, 3.0, 1.0]
+prob = ODEProblem(lotka_volterra!, u₀, tspan, p) 
+sol = solve(prob, Tsit5(), abstol=1e-8, reltol=1e-8, saveat=0.1)
 sol_mat = Matrix(sol)'
 plot(sol.t, sol_mat[:,1], label = "prey")
 plot!(sol.t, sol_mat[:,2], label = "predator")
 ```
 
 ## Neural Network Fitting
+### Data prep
 ```julia
-using DataDrivenDiffEq, DiffEqFlux
+rng = MersenneTwister(20230430)
+X = Array(sol)
+t = sol.t
+DX = Array(sol(sol.t, Val{1}))
+full_problem = DataDrivenProblem(X, t = t, DX = DX)
+x̄ = mean(X, dims =2)
+ϵ = 5e-3
+X_mod = X .+ (ϵ*x̄) .* randn(rng, eltype(X), size(X))
 
+plot(sol, alpha = 0.75, color = :black, label = ["True Data" nothing])
+scatter!(t, transpose(X_mod), color = :red, label = ["Noisy Data" nothing])
+```
+### NN setup
+```julia
+rbf(x) = exp.(.-(x.^2))
+NN = Lux.Chain(
+    Lux.Dense(2, 5, tanh),
+    Lux.Dense(5, 5, tanh),
+    Lux.Dense(5, 5, tanh),
+    Lux.Dense(5, 2)
+)
+p_nn, st = Lux.setup(rng, NN)
+p_nn = ComponentArray(p_nn)
+function ude_dynamics!(du, u, p_nn, t, p_true)
+    û = NN(u, p_nn, st)[1]
+    du[1] = p_true[1]*u[1] + û[1]
+    du[2] = -p_true[4]*u[2] + û[2]
+end
+nn_dynamics!(du, u, p_nn, t) = ude_dynamics!(du, u, p_nn, t, p)
+prob_nn = ODEProblem(nn_dynamics!, X_mod[:,1], tspan, p_nn)
+function nn_predict(θ, X = X_mod[:,1], T = t)
+    _prob = remake(prob_nn, u0 = X, tspan = (T[1], T[end]), p = θ)
+    _sol = solve(_prob, Tsit5(),
+                abstol=1e-8, reltol=1e-8, saveat = T, sensealg = ForwardDiffSensitivity())
+    return Array(_sol)
+end
+function loss(θ)
+    X̂ = nn_predict(θ)
+    sum((X̂ .- X_mod) .^ 2) # take log to prevent large
+end
+loss(p_nn)
+```
+
+### NN Training
+```julia
+# Container to track the losses
+losses = Float64[]
+
+callback = function (p, l)
+  push!(losses, l)
+  if length(losses)%50==0
+      println("Current loss after $(length(losses)) iterations: $(losses[end])")
+  end
+  return false
+end
+# First train with ADAM for better convergence -> move the parameters into a
+# favourable starting positing for BFGS
+adtype = Optimization.AutoZygote()
+optf = Optimization.OptimizationFunction((x,p)->loss(x), adtype)
+optprob = Optimization.OptimizationProblem(optf, ComponentVector{Float64}(p_nn))
+res1 = Optimization.solve(optprob, Optimisers.ADAM(0.1), callback = callback, maxiters = 500, verbose = false)
+#println("Training loss after $(length(losses)) iterations: $(losses[end])")
+# Train with BFGS
+optprob2 = Optimization.OptimizationProblem(optf, res1.minimizer)
+res2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm=0.01), callback=callback, maxiters = 5000, 
+    allow_f_increases = false)
+#println("Final training loss after $(length(losses)) iterations: $(losses[end])")
+p_trained = res2.minimizer
+plot(sol.t, nn_predict(p_trained)',
+        label = ["Approximate Prey" "Approximate Predator"]) 
+scatter!(sol.t, X_mod',
+        label = ["True Prey" "True Predator"]) 
+```
+### Results visualization
+```julia
+## Analysis of the trained network
+# Plot the data and the approximation
+ts = first(sol.t):mean(diff(sol.t))/2:last(sol.t)
+X̂ = nn_predict(p_trained, X_mod[:,1], ts)
+# Trained on noisy data vs real solution
+pl_trajectory = plot(ts, transpose(X̂), xlabel = "t", ylabel ="x(t), y(t)", color = :red, label = ["UDE Approximation" nothing])
+scatter!(sol.t, transpose(X_mod), color = :black, label = ["Measurements" nothing])
+```
+```julia
+# Ideal unknown interactions of the predictor
+Ȳ = [-p[2]*(X̂[1,:].*X̂[2,:])';p[3]*(X̂[1,:].*X̂[2,:])']
+# Neural network guess
+Ŷ = NN(X̂,p_trained,st)[1]
+
+pl_reconstruction = plot(ts, transpose(Ŷ), xlabel = "t", ylabel ="U(x,y)", color = :red, label = ["UDE Approximation" nothing])
+plot!(ts, transpose(Ȳ), color = :black, label = ["True Interaction" nothing])
 ```
 ## Structural Inference
+```julia
+# Create a Basis
+@variables u[1:2]
+# Generate the basis functions, multivariate polynomials up to deg 5
+# and sine
+b = [polynomial_basis(u, 5); sin.(u)]
+basis = Basis(b,u)
+# Create the thresholds which should be used in the search process
+λ = exp10.(-10:0.01:5)
+# Create an optimizer for the SINDy problem
+opt = STLSQ(λ)
+# Define different problems for the recovery
+ideal_problem = DirectDataDrivenProblem(X̂, Ȳ)
+nn_problem = DirectDataDrivenProblem(X̂, Ŷ)
+
+sampler = DataProcessing(split = 0.99, shuffle = true, batchsize = 4, rng = rng)
+# Test on ideal derivative data for unknown function ( not available )
+println("Sparse regression")
+full_res = solve(full_problem, basis, opt, options = DataDrivenCommonOptions(data_processing = sampler),
+                maxiters = 10000, progress = true)
+ideal_res = solve(ideal_problem, basis, opt, maxiters = 5000, progress = true)
+nn_res = solve(nn_problem, basis, opt, options = DataDrivenCommonOptions(data_processing = sampler),
+            maxiters = 10000, progress = true, allow_f_increases = false)
+results = [full_res; ideal_res; nn_res]
+
+get_basis(nn_res) |> get_parameter_map
+get_basis(nn_res).eqs
+get_basis(ideal_res).eqs
+get_basis(full_res) |> get_parameter_map
+
+nn_res.basis
+
+```
 ### With neural network
 
 ### Without neural network
