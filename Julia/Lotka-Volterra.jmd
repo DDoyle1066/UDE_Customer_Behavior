@@ -27,36 +27,33 @@ using Lux, DiffEqFlux, SciMLSensitivity
 using Plots
 using Statistics
 using Random
+using StableRNGs
 ```
 ## True Data
 Before describing the context 
 ```julia
+rng = StableRNG(1111)
 function lotka_volterra!(du, u, p, t)
     x, y = u
     α, β, δ, γ = p
     du[1] = dx = α*x - β*x*y
     du[2] = dy = δ*x*y - γ*y
 end
-u₀ = [0.44,0.37]
+u₀ = 5.0f0 * rand(rng, 2)
 tspan = (0.0, 5.0)
-p = [1.5, 1.0, 3.0, 1.0]
-prob = ODEProblem{true, SciMLBase.FullSpecialize}(lotka_volterra!, u₀, tspan, p) 
-sol = solve(prob, Tsit5(), abstol=1e-8, reltol=1e-8, saveat=0.1)
-sol_mat = Matrix(sol)'
-plot(sol.t, sol_mat[:,1], label = "prey")
-plot!(sol.t, sol_mat[:,2], label = "predator")
+p = [1.3, 0.9, 0.8, 1.8]
+prob = ODEProblem(lotka_volterra!, u₀, tspan, p) 
+sol = solve(prob, Vern7(), abstol=1e-12, reltol=1e-12, saveat=0.25)
+
 ```
 
 ## Neural Network Fitting
 ### Data prep
 ```julia
-rng = MersenneTwister(20230430)
 X = Array(sol)
 t = sol.t
-DX = Array(sol(sol.t, Val{1}))
-full_problem = DataDrivenProblem(sol)
 x̄ = mean(X, dims =2)
-ϵ = 1e-2
+ϵ = 5e-3
 X_mod = X .+ (ϵ*x̄) .* randn(rng, eltype(X), size(X))
 
 plot(sol, alpha = 0.75, color = :black, label = ["True Data" nothing])
@@ -66,11 +63,13 @@ scatter!(t, transpose(X_mod), color = :red, label = ["Noisy Data" nothing])
 ```julia
 rbf(x) = exp.(.-(x.^2))
 NN = Lux.Chain(
-    Lux.Dense(2, 20, tanh),
-    Lux.Dense(20, 2)
+        Lux.Dense(2, 5, rbf), 
+        Lux.Dense(5, 5, rbf), 
+        Lux.Dense(5, 5, rbf),
+        Lux.Dense(5, 2)
 )
 p_nn, st = Lux.setup(rng, NN)
-p_nn = ComponentArray(p_nn)
+# p_nn = ComponentArray(p_nn)
 function ude_dynamics!(du, u, p_nn, t, p_true)
     û = NN(u, p_nn, st)[1]
     du[1] = p_true[1]*u[1] + û[1]
@@ -80,13 +79,13 @@ nn_dynamics!(du, u, p_nn, t) = ude_dynamics!(du, u, p_nn, t, p)
 prob_nn = ODEProblem{true, SciMLBase.FullSpecialize}(nn_dynamics!, X_mod[:,1], tspan, p_nn)
 function nn_predict(θ, X = X_mod[:,1], T = t)
     _prob = remake(prob_nn, u0 = X, tspan = (T[1], T[end]), p = θ)
-    _sol = solve(_prob, Tsit5(),
-                abstol=1e-8, reltol=1e-8, saveat = T, sensealg = ForwardDiffSensitivity())
+    _sol = solve(_prob, Vern7(),
+                abstol=1e-6, reltol=1e-6, saveat = T)
     return Array(_sol)
 end
 function loss(θ)
     X̂ = nn_predict(θ)
-    sum((X̂ .- X_mod) .^ 2) # take log to prevent large
+    sum(abs2, X̂ .- X_mod) # take log to prevent large
 end
 loss(p_nn)
 ```
@@ -108,22 +107,19 @@ end
 adtype = Optimization.AutoZygote()
 optf = Optimization.OptimizationFunction((x,p)->loss(x), adtype)
 optprob = Optimization.OptimizationProblem(optf, ComponentVector{Float64}(p_nn))
-res1 = Optimization.solve(optprob, Optimisers.ADAM(0.1), callback = callback, maxiters = 500, verbose = false)
-#println("Training loss after $(length(losses)) iterations: $(losses[end])")
+res1 = Optimization.solve(optprob, Optimisers.ADAM(), callback = callback, maxiters = 5000, verbose = false)
+println("Training loss after $(length(losses)) iterations: $(losses[end])")
 # Train with BFGS
-optprob2 = Optimization.OptimizationProblem(optf, res1.minimizer)
-res2 = Optimization.solve(optprob2, Optim.BFGS(initial_stepnorm=0.1), callback=callback, maxiters = 5000, 
-    allow_f_increases = false)
-# Finish with ADAM with very small step size 
-optprob3 = Optimization.OptimizationProblem(optf, res2.minimizer)
-res3 = Optimization.solve(optprob3, Optimisers.ADAM(0.001), callback=callback, maxiters = 500, 
-    allow_f_increases = false)
+optprob2 = Optimization.OptimizationProblem(optf, res1.u)
+res2 = Optimization.solve(optprob2, Optim.LBFGS(), callback = callback, maxiters = 1000)
+println("Final training loss after $(length(losses)) iterations: $(losses[end])")
 #println("Final training loss after $(length(losses)) iterations: $(losses[end])")
-p_trained = res2.minimizer
-plot(sol.t, nn_predict(p_trained)',
-        label = ["Approximate Prey" "Approximate Predator"]) 
-scatter!(sol.t, X_mod',
-        label = ["True Prey" "True Predator"]) 
+p_trained = res2.u
+# Plot the losses
+pl_losses = plot(1:5000, losses[1:5000], yaxis = :log10, xaxis = :log10,
+                 xlabel = "Iterations", ylabel = "Loss", label = "ADAM", color = :blue)
+plot!(5001:length(losses), losses[5001:end], yaxis = :log10, xaxis = :log10,
+      xlabel = "Iterations", ylabel = "Loss", label = "BFGS", color = :red)
 ```
 ### Results visualization
 ```julia
@@ -144,50 +140,106 @@ Ŷ = NN(X̂,p_trained,st)[1]
 pl_reconstruction = plot(ts, transpose(Ŷ), xlabel = "t", ylabel ="U(x,y)", color = :red, label = ["UDE Approximation" nothing])
 plot!(ts, transpose(Ȳ), color = :black, label = ["True Interaction" nothing])
 ```
+```julia
+# Plot the error
+pl_reconstruction_error = plot(ts, norm.(eachcol(Ȳ - Ŷ)), yaxis = :log, xlabel = "t",
+                               ylabel = "L2-Error", label = nothing, color = :red)
+pl_missing = plot(pl_reconstruction, pl_reconstruction_error, layout = (2, 1))
+
+pl_overall = plot(pl_trajectory, pl_missing)
+```
 ## Structural Inference
 ```julia
 # Create a Basis
 @variables u[1:2]
 # Generate the basis functions, multivariate polynomials up to deg 5
 # and sine
-b = [polynomial_basis(u, 5); u]
+b = polynomial_basis(u, 4)
 basis = Basis(b,u)
 # Create the thresholds which should be used in the search process
-λ = exp10.(-10:0.01:5)
+λ = exp10.(-3:0.01:3)
 # Create an optimizer for the SINDy problem
-opt = STLSQ(λ)
+opt = ADMM(λ)
 # Define different problems for the recovery
+full_problem = ContinuousDataDrivenProblem(X_mod, t)
 ideal_problem = DirectDataDrivenProblem(X̂, Ȳ)
 nn_problem = DirectDataDrivenProblem(X̂, Ŷ)
-nn_prob_new = ODEProblem{true, SciMLBase.FullSpecialize}(nn_dynamics!, X[:,1], (0, 100), p_trained)
-nn_sol_new = solve(nn_prob_new, Tsit5(), saveat = 0.1)
-nn_prob_2 = DataDrivenProblem(nn_sol_new)
-sampler = DataProcessing(split = 0.99, shuffle = true, batchsize = 10, rng = rng)
+options = DataDrivenCommonOptions(maxiters = 10_000,
+                                  normalize = DataNormalization(ZScoreTransform),
+                                  selector = bic,digits = 1,
+                                  data_processing = DataProcessing(split = 0.9,
+                                                                   batchsize = 30,
+                                                                   shuffle = true,
+                                                                   rng = StableRNG(1111)))
 # Test on ideal derivative data for unknown function ( not available )
 println("Sparse regression")
-full_res = solve(full_problem, basis, opt, options = DataDrivenCommonOptions(data_processing = sampler),
-                maxiters = 10000, progress = true)
-ideal_res = solve(ideal_problem, basis, opt, maxiters = 5000, progress = true)
-nn_res = solve(nn_problem, basis, opt,
-            maxiters = 10000, progress = true)
-nn_res_2 = solve(nn_prob_2, basis, opt,
-            maxiters = 10000, progress = true)
-results = [full_res; ideal_res; nn_res]
+full_res = solve(full_problem, basis, opt, options = options)
+full_eqs = get_basis(full_res)
+println(full_eqs)
+ideal_res = solve(ideal_problem, basis, opt, options = options)
+ideal_eqs = get_basis(ideal_res)
+println(ideal_eqs)
+nn_res = solve(nn_problem, basis, opt, options = options)
+nn_eqs = get_basis(nn_res)
+println(nn_eqs)
+for eqs in (full_eqs, ideal_eqs, nn_eqs)
+    println(eqs)
+    println(get_parameter_map(eqs))
+    println()
+end
+```
 
-get_basis(ideal_res) |> get_parameter_map
-get_basis(nn_res) |> get_parameter_map
-get_basis(nn_res).eqs
-get_basis(nn_res_2).eqs
-get_basis(ideal_res).eqs
-get_basis(full_res) |> get_parameter_map
+```julia
+# Define the recovered, hybrid model
+function recovered_dynamics!(du, u, p_est, t)
+    û = nn_eqs(u, p_est) # Recovered equations
+    du[1] = p[1] * u[1] + û[1]
+    du[2] = -p[4] * u[2] + û[2]
+end
 
-nn_res.basis.eqs
+estimation_prob = ODEProblem(recovered_dynamics!, u₀, tspan, get_parameter_values(nn_eqs))
+estimate = solve(estimation_prob, Tsit5(), saveat = t)
+
+# Plot
+plot(sol)
+plot!(estimate)
+```
+```julia
+function parameter_loss(p)
+    Y = reduce(hcat, map(Base.Fix2(nn_eqs, p), eachcol(X̂)))
+    sum(abs2, Ŷ .- Y)
+end
+
+optf = Optimization.OptimizationFunction((x, p) -> parameter_loss(x), adtype)
+optprob = Optimization.OptimizationProblem(optf, get_parameter_values(nn_eqs))
+parameter_res = Optimization.solve(optprob, Optim.LBFGS(), maxiters = 1000)
+```
+
+
+```julia
+# Look at long term prediction
+t_long = (0.0, 50.0)
+prob_nn_long = ODEProblem(recovered_dynamics!, u₀, t_long, parameter_res)
+estimate_long = solve(estimation_prob, Tsit5(), abstol = 1e-6, reltol=1e-6, saveat = 0.1) # Using higher tolerances here results in exit of julia
+plot(estimate_long, label = ["Approx u1(t)" "Approx u2(t)"])
+
+true_prob = ODEProblem(lotka_volterra!, u₀, t_long, p)
+true_solution_long = solve(true_prob, Tsit5(), abstol = 1e-6, reltol=1e-6, saveat = estimate_long.t)
+plot!(true_solution_long, label = ["True u1(t)" "True u2(t)"])
+```
+```julia
+# Look at long term prediction
+t_long = (0.0, 50.0)
+estimation_prob = ODEProblem(recovered_dynamics!, u₀, t_long, parameter_res)
+estimate_long = solve(estimation_prob, Tsit5(), abstol = 1e-6, reltol=1e-6, saveat = 0.1) # Using higher tolerances here results in exit of julia
+plot(estimate_long, label = ["Approx u1(t)" "Approx u2(t)"])
+
+true_prob = ODEProblem(lotka_volterra!, u₀, t_long, p)
+true_solution_long = solve(true_prob, Tsit5(), abstol = 1e-6, reltol=1e-6, saveat = estimate_long.t)
+plot!(true_solution_long, label = ["True u1(t)" "True u2(t)"])
+```
+## Bayesian Network Fitting
+```julia
 
 ```
-### With neural network
-
-### Without neural network
-
-## Bayesian Network Fitting
-
 ## Probabilistic Structure Inference
