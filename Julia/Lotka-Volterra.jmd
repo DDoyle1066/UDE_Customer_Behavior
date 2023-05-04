@@ -248,27 +248,3 @@ true_prob = ODEProblem(lotka_volterra!, u₀, t_long, p)
 true_solution_long = solve(true_prob, Tsit5(), abstol = 1e-6, reltol=1e-6, saveat = estimate_long.t)
 plot!(true_solution_long, label = ["True u1(t)" "True u2(t)"])
 ```
-## Bayesian Network Fitting
-```julia
-using Turing
-alpha = 0.09
-sig = sqrt(1 /alpha)
-function nn_predict_turing(params, layers)
-    # 
-end
-@model function deep_bayes_ode(data)
-    σ ~ InverseGamma(2,3)
-    n_params = Lux.parameterlength(p_nn)
-    nn_params ~  MvNormal(zeros(n_params), sig .* ones(n_params))
-    preds = nn_predict(nn_params)
-    for i in 1:size(data)[2]
-        data[:,i] ~ MvNormal(preds[:,i], σ)
-    end
-    return nothing
-end
-```
-```julia
-deep_bayes_ode_model = deep_bayes_ode(X_mod)
-chain = sample(deep_bayes_ode_model, NUTS(0.65), 1000)
-```
-## Probabilistic Structure Inference
