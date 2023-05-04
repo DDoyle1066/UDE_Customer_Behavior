@@ -1,0 +1,44 @@
+# QSIR model
+as described in [this paper](https://arxiv.org/pdf/2004.02752.pdf)
+Code is based on the paper's original code [here](https://github.com/RajDandekar/COVID-19-ML-Quarantine-Control-Model/blob/master/Final_Code_US_NN_QSIR.jl)
+## Load packages
+```julia
+using OrdinaryDiffEq
+using ModelingToolkit
+using DataDrivenDiffEq
+using DataDrivenSparse
+using LinearAlgebra, ComponentArrays
+using Zygote, Optimization, OptimizationOptimJL, OptimizationFlux, OptimizationOptimisers
+using Lux, DiffEqFlux, SciMLSensitivity
+using Plots
+using Statistics
+using Random
+using StableRNGs
+using MAT
+using Measures
+using DifferentialEquations
+```
+
+## Data
+```julia
+vars = matread("data/US_Track_Dead.mat")
+
+Infected = vars["US_Infected_All"]
+Recovered = vars["US_Recovered_All"]
+Dead = vars["US_Dead_All"]
+Time = vars["US_Time"]
+```
+## ODE setup
+```julia
+rng = StableRNG(1111)
+rbf(x) = exp.(.-(x.^2))
+NN = Lux.Chain(
+        Lux.Dense(4, 5, rbf), 
+        Lux.Dense(5, 5, rbf), 
+        Lux.Dense(5, 5, rbf),
+        Lux.Dense(5, 1)
+)
+p_nn, st = Lux.setup(rng, NN)
+p_nn = ComponentArray((; p_nn..., β = ))
+
+```
