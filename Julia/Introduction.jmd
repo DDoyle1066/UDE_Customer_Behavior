@@ -136,10 +136,10 @@ autonomous agents.
 One technique that is used is Universal Differential Equations an idea pioneered by Chris Rackauckas
 to incorporate the benefits of deep learning in areas such as clinical trials where data is more 
 limited and understanding of causality is crucial to the study. The general UDE process is summarized below
-1. Identify know parts of a model, build a UDE
+1. Identify known parts of a model, build a UDE
 2. Train a neural network (or other approximator) to capture the missing mechanisms
 3. Sparse identify the missterms to mechanistic terms 
-4. Verify the mechanistic terms are scientifically plausibl
+4. Verify the mechanistic terms are scientifically plausible
 5. Get more data to verify the new terms
 
 The rest of this project goes through three examples that use this framework to automatically detect 
